@@ -1,5 +1,43 @@
 ﻿# Powershell Remote Session Tool using Framework by Nic Fuentes
-CLS
+
+# Description: This script provides a GUI-based tool for establishing PowerShell remote sessions to target machines. It allows users to copy files (scripts or executables) to the remote machine, run selected files or custom PowerShell commands remotely, delete files from the remote directory, check logged-in users, and manage sessions securely. It handles connection checks for VPN or domain, sets execution policies if needed, and logs activities. The tool ensures operations run with admin privileges and supports retry mechanisms for connectivity issues.
+
+# Version: 1.1
+
+#region Release Notes
+########################
+#1.0 Initial Tool release; GUI for remote sessions, file copy/run/delete, user check, logging
+#1.1 Added PowerShell 7 installation check, script version update mechanism with timestamp comparison and auto-relaunch (similar to TS Tools.ps1)
+#endregion
+
+#region MIG PII
+########################
+$netSharePath  = "\\brnas\pcsupport\Applications\Tech Support Tools\Powershell Scripts\Powershell Remote Tool\PSSession Tool.ps1"
+$netshare      = "\\brnas.int.mgc.com\pcsupport\Applications\Tanium\Tanium Cloud"
+$dc            = 'brprdc01.int.mgc.com'
+$vpnipr        = '10.*'
+$domainipr     = '10.32.*'
+$domainipralt  = '10.32'
+$migvpnadapter = 'PANGP Virtual Ethernet Adapter Secure'
+$MIGDomain     = "int.mgc.com"
+$Seconds       = '10'
+#endregion
+
+#region VARIABLES
+########################
+#Script Path Variable
+if ($psISE) {
+    # Running in PowerShell ISE
+    $LocalScriptPath = $psISE.CurrentFile.FullPath
+} else {
+    # Running in standard PowerShell
+    $LocalScriptPath = $MyInvocation.MyCommand.Path
+}
+#endregion
+
+#region FUNCTIONS
+########################
+
 # Function to write to log file (defined first to avoid scoping issues)
 function Write-Log {
     param (
@@ -14,49 +52,6 @@ function Write-Log {
         return
     }
     Add-Content -Path $LogFile -Value $LogMessage -ErrorAction SilentlyContinue
-}
-
-try {
-    Write-Host "Script starting at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') on 10:20 PM PDT, Thursday, September 25, 2025"
-    Write-Log "Initializing script execution."
-    # Define log file path
-    $LogFile = "C:\DesktopSupportTools\RemoteScriptExecutionLog\RemoteScriptExecution_Log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
-    try {
-        if (-not (Test-Path "C:\DesktopSupportTools")) {
-            Write-Host "Creating directory C:\DesktopSupportTools"
-            New-Item -Path "C:\DesktopSupportTools" -ItemType Directory -Force | Out-Null
-            Write-Log "Directory C:\DesktopSupportTools created."
-        } else {
-            Write-Log "Directory C:\DesktopSupportTools already exists."
-        }
-        if (-not (Test-Path "C:\DesktopSupportTools\RemoteScriptExecutionLog")) {
-            Write-Host "Creating directory C:\DesktopSupportTools\RemoteScriptExecutionLog"
-            New-Item -Path "C:\DesktopSupportTools\RemoteScriptExecutionLog" -ItemType Directory -Force | Out-Null
-            Write-Log "Directory C:\DesktopSupportTools\RemoteScriptExecutionLog created."
-        } else {
-            Write-Log "Directory C:\DesktopSupportTools\RemoteScriptExecutionLog already exists."
-        }
-        Write-Host "Log file will be created at: $LogFile"
-        Write-Log "Log file path set to: $LogFile"
-    } catch {
-        Write-Log "ERROR: Failed to create or access C:\DesktopSupportTools\RemoteScriptExecutionLog. Error: ${_.Exception.Message}"
-        throw
-    }
-} catch {
-    Write-Error "Failed to initialize script: ${_.Exception.Message}"
-    [System.Windows.Forms.MessageBox]::Show("Failed to initialize script. Error: ${_.Exception.Message} Please ensure admin rights and try again.", "Initialization Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    exit 1
-}
-
-# Load required .NET assemblies with error handling
-try {
-    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
-    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-    Write-Log "Successfully loaded System.Windows.Forms and System.Drawing assemblies."
-} catch {
-    Write-Log "ERROR: Failed to load required .NET assemblies. Error: ${_.Exception.Message}"
-    [System.Windows.Forms.MessageBox]::Show("Failed to load required .NET assemblies. Please ensure PowerShell environment supports GUI. Error: ${_.Exception.Message}", "Assembly Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    exit 1
 }
 
 # Function to check and set execution policy
@@ -111,18 +106,18 @@ function Test-ValidIPAddress {
 
 # Function to test VPN or domain connection status
 function Test-ConnectionStatus {
-    $vpnAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -eq $MIGVPNAdapter -and $_.Status -eq 'Up' }
+    $vpnAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -eq $migvpnadapter -and $_.Status -eq 'Up' }
     if ($vpnAdapter) {
         $ipv4Address = (Get-NetIPAddress -InterfaceIndex $vpnAdapter.InterfaceIndex -AddressFamily IPv4).IPAddress
-        if ($ipv4Address -like $VPNIPR) {
+        if ($ipv4Address -like $vpnipr) {
             return $true
         }
     }
     $domainAdapter = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
     if ($domainAdapter) {
         $ipv4Address = (Get-NetIPAddress -InterfaceIndex $domainAdapter.InterfaceIndex -AddressFamily IPv4).IPAddress
-        if ($ipv4Address -like $DOMAINIPR) {
-            if (Test-Connection -ComputerName $DC -Count 1 -Quiet) {
+        if ($ipv4Address -like $domainipr) {
+            if (Test-Connection -ComputerName $dc -Count 1 -Quiet) {
                 return $true
             }
         }
@@ -169,29 +164,29 @@ function Test-MIGConnection {
 function Get-IPAddressFromDialog {
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "Enter Target Computer Name or IP Address"
-    $Form.Size = New-Object System.Drawing.Size(400,200)
+    $Form.Size = New-Object System.Drawing.Size(500,200)
     $Form.StartPosition = "CenterScreen"
     $Form.FormBorderStyle = "FixedDialog"
     $Form.MaximizeBox = $false
     $Form.MinimizeBox = $false
     $Label = New-Object System.Windows.Forms.Label
     $Label.Location = New-Object System.Drawing.Point(10,20)
-    $Label.Size = New-Object System.Drawing.Size(340,25)
-    $Label.Text = "Enter the target computer name or IP address (e.g., PC-PC12345L or 10.32.240.84):"
+    $Label.Size = New-Object System.Drawing.Size(460,40)
+    $Label.Text = "Enter the target computer name or IP address (e.g., PC-PC-PC12345L or 10.32.240.84):"
     $Form.Controls.Add($Label)
     $TextBox = New-Object System.Windows.Forms.TextBox
-    $TextBox.Location = New-Object System.Drawing.Point(10,50)
-    $TextBox.Size = New-Object System.Drawing.Size(260,20)
+    $TextBox.Location = New-Object System.Drawing.Point(10,70)
+    $TextBox.Size = New-Object System.Drawing.Size(460,20)
     $Form.Controls.Add($TextBox)
     $OKButton = New-Object System.Windows.Forms.Button
-    $OKButton.Location = New-Object System.Drawing.Point(150,120)
+    $OKButton.Location = New-Object System.Drawing.Point(170,120)
     $OKButton.Size = New-Object System.Drawing.Size(75,23)
     $OKButton.Text = "OK"
     $OKButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $Form.AcceptButton = $OKButton
     $Form.Controls.Add($OKButton)
     $CancelButton = New-Object System.Windows.Forms.Button
-    $CancelButton.Location = New-Object System.Drawing.Point(230,120)
+    $CancelButton.Location = New-Object System.Drawing.Point(250,120)
     $CancelButton.Size = New-Object System.Drawing.Size(75,23)
     $CancelButton.Text = "Cancel"
     $CancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
@@ -209,7 +204,7 @@ function Get-IPAddressFromDialog {
 # Function to select a local file (script or executable) via GUI
 function Get-FilePath {
     $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
-    $OpenFileDialog.Title = "Select File to Copy (Script or Executable)"
+    $OpenFileDialog.Title = "Select File to Copy (Script or executable)"
     $OpenFileDialog.Filter = "All Files (*.*)|*.*|PowerShell Scripts (*.ps1)|*.ps1|Executables (*.exe)|*.exe"
     $OpenFileDialog.InitialDirectory = "\\brnas\pcsupport\Applications\Tech Support Tools\Powershell Scripts"
     $Result = $OpenFileDialog.ShowDialog()
@@ -365,7 +360,7 @@ function Delete-File {
     if (-not $Files) {
         Write-Log -Message "ERROR: No files found in C:\DesktopSupportTools on $TargetIP."
         [System.Windows.Forms.MessageBox]::Show("No files found in C:\DesktopSupportTools on $TargetIP.", "No Files", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-        return
+        return $null
     }
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "Delete File"
@@ -451,7 +446,7 @@ function Check-LoggedInUser {
 # Function to prompt initial action
 function Prompt-InitialAction {
     $Form = New-Object System.Windows.Forms.Form
-    $Form.Text = "Python Toolkit Choose Action"
+    $Form.Text = "PowerShell Remote Session Tool Choose Action"
     $Form.Size = New-Object System.Drawing.Size(400,250)
     $Form.StartPosition = "CenterScreen"
     $Form.FormBorderStyle = "FixedDialog"
@@ -584,283 +579,365 @@ function Prompt-SessionAction {
     return $Result
 }
 
-# Function to force reboot
-<#
-function Force-Reboot {
-    param (
-        [Parameter(Mandatory=$true)]
-        [string]$TargetIP,
-        [Parameter(Mandatory=$true)]
-        [System.Management.Automation.Runspaces.PSSession]$Session
-    )
-    $Confirm = [System.Windows.Forms.MessageBox]::Show(
-        "Are you sure you want to force a reboot on the remote machine? This will terminate all processes and restart immediately.",
-        "Confirm Reboot",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Warning
-    )
-    if ($Confirm -eq [System.Windows.Forms.DialogResult]::No) {
-        Write-Log -Message "User cancelled the reboot operation."
-        return
+#endregion
+
+$reinitialize = $true
+
+while ($reinitialize) {
+    $reinitialize = $false
+
+    Clear-Host
+    
+    Write-Host "Script Initialization - Powershell Remote Session Tool $($ScriptVer)"
+    Write-Host "Checking for MIG or VPN Connection"
+
+    # Loop until VPN connection is active
+    while (-not (Test-ConnectionStatus)) {
+        Write-Host "MIG or VPN connection is not active or does not meet the criteria."
+        Write-Host "Please confirm your connection and press any key to try again."
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     }
+    Write-Host "Connection is active."
+
+    Write-Host "Checking Script Path"
+    Write-Host "Script Path: $LocalScriptPath"
+
+    Write-Host "Checking for Script Updates"
+    
+    # Get the last write time of the files
+    $netShareLastWriteTime = (Get-Item $netSharePath).LastWriteTime
+    $localLastWriteTime = (Get-Item $LocalScriptPath).LastWriteTime
+    Write-Host "Server Version:  $netShareLastWriteTime"
+    Write-Host " Local Version:  $localLastWriteTime"
+
+    # Compare the last write times
+    if ($netShareLastWriteTime -gt $localLastWriteTime) {
+        Write-Host "Updating local script with the latest version from the network share..."
+        Copy-Item -Path $netSharePath -Destination $LocalScriptPath -Force
+        Write-Host "Script is updated...Relaunching script in 5 seconds"
+        Start-Sleep -Seconds 5
+
+        # Relaunch the updated script without exiting the current process
+        Write-Host "Relaunching the updated script..."
+        Start-Process -FilePath "pwsh.exe" -ArgumentList "-File `"$LocalScriptPath`"" 
+        exit
+    } else {
+        Write-Host "Local script is up to date."
+    }
+
+    # Check if PowerShell 7 is installed on the local machine
+    $pwsh7Path = "C:\Program Files\PowerShell\7"
+    $isPwsh7Installed = Test-Path $pwsh7Path
+    if (-not $isPwsh7Installed) {
+        Write-Host "PowerShell 7 not found on local machine. Copying and installing..."
+        $msiSource = "\\brnas\pcsupport\Applications\Tech Support Tools\Powershell Scripts\Powershell 7 MSI Installer\PowerShell-7.5.4-win-x64.msi"
+        $msiDest = "C:\DesktopSupportTools\PowerShell-7.5.4-win-x64.msi"
+        try {
+            # Ensure local directory exists
+            New-Item -Path "C:\DesktopSupportTools" -ItemType Directory -Force | Out-Null
+            Copy-Item -Path $msiSource -Destination $msiDest -ErrorAction Stop
+            Write-Host "Copied PowerShell 7 MSI to local machine."
+            $process = Start-Process msiexec.exe -ArgumentList "/i `"$msiDest`" /quiet /norestart" -Wait -NoNewWindow -PassThru
+            $installResult = $process.ExitCode
+            if ($installResult -eq 0) {
+                Write-Host "PowerShell 7 installed successfully on local machine. Please restart the script."
+                Start-Sleep -Seconds 5
+                exit 0
+            } else {
+                Write-Host "Failed to install PowerShell 7 on local machine. Exit code: $installResult"
+                Start-Sleep -Seconds 5
+                exit 1
+            }
+        } catch {
+            Write-Host "ERROR: Failed to copy or install PowerShell 7 on local machine. Error: $($_.Exception.Message)"
+            Start-Sleep -Seconds 5
+            exit 1
+        }
+    } else {
+        Write-Host "PowerShell 7 is already installed on local machine."
+    }
+
     try {
-        Invoke-Command -Session $Session -ScriptBlock {
-            shutdown /r /f /t 0
-        } -ErrorAction Stop
-        Write-Log -Message "Reboot command sent successfully to $TargetIP."
-        [System.Windows.Forms.MessageBox]::Show("Reboot command sent successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        Write-Host "Script starting at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') on 10:20 PM PDT, Thursday, September 25, 2025"
+        Write-Log "Initializing script execution."
+        # Define log file path
+        $LogFile = "C:\DesktopSupportTools\RemoteScriptExecutionLog\RemoteScriptExecution_Log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+        try {
+            if (-not (Test-Path "C:\DesktopSupportTools")) {
+                Write-Host "Creating directory C:\DesktopSupportTools"
+                New-Item -Path "C:\DesktopSupportTools" -ItemType Directory -Force | Out-Null
+                Write-Log "Directory C:\DesktopSupportTools created."
+            } else {
+                Write-Log "Directory C:\DesktopSupportTools already exists."
+            }
+            if (-not (Test-Path "C:\DesktopSupportTools\RemoteScriptExecutionLog")) {
+                Write-Host "Creating directory C:\DesktopSupportTools\RemoteScriptExecutionLog"
+                New-Item -Path "C:\DesktopSupportTools\RemoteScriptExecutionLog" -ItemType Directory -Force | Out-Null
+                Write-Log "Directory C:\DesktopSupportTools\RemoteScriptExecutionLog created."
+            } else {
+                Write-Log "Directory C:\DesktopSupportTools\RemoteScriptExecutionLog already exists."
+            }
+            Write-Host "Log file will be created at: $LogFile"
+            Write-Log "Log file path set to: $LogFile"
+        } catch {
+            Write-Log "ERROR: Failed to create or access C:\DesktopSupportTools\RemoteScriptExecutionLog. Error: ${_.Exception.Message}"
+            throw
+        }
     } catch {
-        Write-Log -Message "ERROR: Failed to force reboot on $TargetIP. Error: ${_.Exception.Message}"
-        [System.Windows.Forms.MessageBox]::Show("Failed to force reboot. Error: ${_.Exception.Message}", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    }
-}
-#>
-
-# Define environment variables
-$ScriptVer = '3.0'
-$ScriptEnv = "Powershell Remote Session Tool using Framework by Nic Fuentes"
-$MIGVPNAdapter = 'PANGP Virtual Ethernet Adapter Secure'
-$VPNIPR = '10.*'
-$DOMAINIPR = '10.32.*'
-$DOMAINIPRALt = '10.32'
-$DC = 'brprdc01.int.mgc.com'
-$MIGDomain = "int.mgc.com"
-$Seconds = '10'
-
-# Main script
-try {
-    Set-ExecutionPolicyIfNeeded
-    Write-Log -Message "Script started. Log file: $LogFile"
-    Write-Log -Message "Checking for MIG or VPN connection..."
-    if (-not (Test-ConnectionStatus)) {
-        Write-Log -Message "ERROR: MIG or VPN connection is not active."
-        [System.Windows.Forms.MessageBox]::Show("MIG or VPN connection is not active. Please connect and try again.", "Connection Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        Write-Error "Failed to initialize script: ${_.Exception.Message}"
+        [System.Windows.Forms.MessageBox]::Show("Failed to initialize script. Error: ${_.Exception.Message} Please ensure admin rights and try again.", "Initialization Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         exit 1
     }
-    Write-Log -Message "Connection is active."
-    do {
-        $InitialAction = Prompt-InitialAction
-        Write-Log "Initial action result: $InitialAction"
-        switch ($InitialAction) {
-            ([System.Windows.Forms.DialogResult]::Yes) {
-                Write-Log -Message "User chose to start a new session."
-                $TargetIP = Get-IPAddressFromDialog
-                if (-not $TargetIP) {
-                    Write-Log -Message "No computer name or IP provided or dialog cancelled. Returning to main menu."
-                    continue
-                }
-                if (-not (Test-ValidIPAddress -IPAddress $TargetIP)) {
-                    Write-Log -Message "Input '$TargetIP' is not an IP address. Attempting to resolve..."
-                    Test-MIGConnection -MachineList $TargetIP -DomainSuffix $MIGDomain
-                    if ($Global:FinalArray -and $Global:FinalArray.Count -gt 0) {
-                        $TargetIP = $Global:FinalArray[0]
-                        Write-Log -Message "Resolved '$TargetIP' to $TargetIP."
-                    } else {
-                        Write-Log -Message "ERROR: Could not resolve '$TargetIP' to an IP address."
-                        [System.Windows.Forms.MessageBox]::Show("Could not resolve '$TargetIP' to an IP address.", "Resolution Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                        continue
-                    }
-                }
-                Write-Log -Message "Target computer name/IP: $TargetIP"
-                $MaxPingRetries = 3
-                $PingRetryCount = 0
-                $PingSuccess = $false
-                while (-not $PingSuccess -and $PingRetryCount -lt $MaxPingRetries) {
-                    Write-Log -Message "Testing connectivity to $TargetIP (Attempt $($PingRetryCount + 1)/$MaxPingRetries)..."
-                    if (Test-Connection -ComputerName $TargetIP -Count 1 -Quiet) {
-                        Write-Log -Message "Successfully pinged $TargetIP."
-                        $PingSuccess = $true
-                    } else {
-                        $PingRetryCount++
-                        Write-Log -Message "ERROR: Failed to reach $TargetIP (Attempt $PingRetryCount/$MaxPingRetries)."
-                        if ($PingRetryCount -lt $MaxPingRetries) {
-                            Write-Log -Message "Retrying in 5 seconds..."
-                            Start-Sleep -Seconds 5
-                        }
-                    }
-                }
-                if (-not $PingSuccess) {
-                    Write-Log -Message "ERROR: Cannot reach $TargetIP after $MaxPingRetries attempts."
-                    [System.Windows.Forms.MessageBox]::Show("Cannot reach $TargetIP after $MaxPingRetries attempts.", "Connection Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                    continue
-                }
-                Write-Log -Message "Checking TrustedHosts configuration..."
-                $TrustedHosts = (Get-Item -Path WSMan:\localhost\Client\TrustedHosts).Value
-                Write-Log -Message "Current TrustedHosts: $TrustedHosts"
-                if ($TrustedHosts -notlike "*$TargetIP*") {
-                    try {
-                        Set-Item -Path WSMan:\localhost\Client\TrustedHosts -Value "" -Force -ErrorAction Stop
-                        Write-Log -Message "Cleared existing TrustedHosts."
-                        Set-Item -Path WSMan:\localhost\Client\TrustedHosts -Value $TargetIP -Force -ErrorAction Stop
-                        Write-Log -Message "Added $TargetIP to TrustedHosts."
-                    } catch {
-                        Write-Log -Message "ERROR: Failed to update TrustedHosts. Error: ${_.Exception.Message}"
-                        continue
-                    }
-                }
-                Write-Log -Message "Testing WinRM connectivity to $TargetIP on port 5985..."
-                $NetTest = Test-NetConnection -ComputerName $TargetIP -Port 5985 -ErrorAction Stop
-                Write-Log -Message "Network Test: TcpTestSucceeded = $($NetTest.TcpTestSucceeded)"
-                if (-not $NetTest.TcpTestSucceeded) {
-                    Write-Log -Message "ERROR: Port 5985 is not accessible on $TargetIP. Check firewall or VPN settings."
-                    [System.Windows.Forms.MessageBox]::Show("Port 5985 is not accessible on $TargetIP. Check firewall or VPN settings.", "WinRM Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                    continue
-                }
-                Write-Log -Message "Establishing PowerShell session to $TargetIP..."
-                $MaxRetries = 5
-                $RetryCount = 0
-                $Session = $null
-                $SessionOption = New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 60000
-                while (-not $Session -and $RetryCount -lt $MaxRetries) {
-                    try {
-                        $Session = New-PSSession -ComputerName $TargetIP -SessionOption $SessionOption -ErrorAction Stop
-                        Write-Log -Message "PowerShell session established successfully."
-                        $Status = Invoke-Command -Session $Session -ScriptBlock {
-                            $WinRM = Get-Service -Name WinRM | Select-Object -Property Status
-                            $UAC = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -ErrorAction SilentlyContinue
-                            $UACStatus = if ($UAC -and $UAC.LocalAccountTokenFilterPolicy -eq 1) { "UAC allows remote admin access" } else { "UAC may block remote admin access" }
-                            return @{ WinRMStatus = $WinRM.Status; UACStatus = $UACStatus }
-                        }
-                        Write-Log -Message "WinRM Status: $($Status.WinRMStatus)"
-                        Write-Log -Message "UAC Status: $($Status.UACStatus)"
-                        break
-                    } catch {
-                        $RetryCount++
-                        Write-Log -Message "ERROR: Failed to establish session to $TargetIP (Attempt $RetryCount/$MaxRetries). Error: ${_.Exception.Message}"
-                        if ($_.Exception.Message -match "Access is denied") {
-                        } elseif ($_.Exception.Message -match "WinRM") {
-                            Write-Log -Message "WinRM error. Ensure WinRM is enabled on $TargetIP and port 5985 is open."
-                        }
-                        if ($RetryCount -lt $MaxRetries) {
-                            Write-Log -Message "Retrying in 10 seconds..."
-                            Start-Sleep -Seconds 10
-                        }
-                    }
-                }
-                if (-not $Session) {
-                    Write-Log -Message "ERROR: Failed to establish session after $MaxRetries attempts."
-                    [System.Windows.Forms.MessageBox]::Show("Failed to establish session after $MaxRetries attempts.", "Session Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                    continue
-                }
-                do {
-                    if (-not $Session -or $Session.State -ne 'Opened') {
-                        Write-Log -Message "ERROR: Session is null or not open. Attempting to reconnect to $TargetIP..."
-                        try {
-                            Remove-PSSession -Session $Session -ErrorAction SilentlyContinue
-                            $Session = New-PSSession -ComputerName $TargetIP -SessionOption $SessionOption -ErrorAction Stop
-                            Write-Log -Message "Reconnected session successfully."
-                        } catch {
-                            Write-Log -Message "ERROR: Failed to reconnect session to $TargetIP. Error: ${_.Exception.Message}"
-                            break
-                        }
-                    }
-                    $SessionAction = Prompt-SessionAction
-                    Write-Log "Session action result: $SessionAction"
-                    switch ($SessionAction) {
-                        ([System.Windows.Forms.DialogResult]::Yes) {
-                            Write-Log -Message "User chose to copy a file."
-                            $FilePath = Get-FilePath
-                            if ($FilePath) {
-                                try {
-                                    Copy-Item -Path $FilePath -Destination "C:\DesktopSupportTools\" -ToSession $Session -ErrorAction Stop
-                                    Write-Log -Message "Successfully copied file '$($FilePath.Split('\')[-1])' to C:\DesktopSupportTools on $TargetIP."
-                                    [System.Windows.Forms.MessageBox]::Show("Successfully copied '$($FilePath.Split('\')[-1])' to C:\DesktopSupportTools.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-                                } catch {
-                                    Write-Log -Message "ERROR: Failed to copy file to $TargetIP. Error: ${_.Exception.Message}"
-                                    [System.Windows.Forms.MessageBox]::Show("Failed to copy file. Error: ${_.Exception.Message}", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                                }
-                            } else {
-                                Write-Log -Message "No file selected for copying."
-                            }
-                        }
-                        ([System.Windows.Forms.DialogResult]::OK) {
-                            Write-Log -Message "User chose to run a file."
-                            $SelectedFile = Select-FileToRun -Session $Session
-                            if ($SelectedFile) {
-                                try {
-                                    $FilePath = "C:\DesktopSupportTools\$SelectedFile"
-                                    Write-Log -Message "Running file '$SelectedFile' on $TargetIP..."
-                                    $Result = Invoke-Command -Session $Session -ScriptBlock {
-                                        param($Path)
-                                        try {
-                                            New-Item -Path "C:\DesktopSupportTools" -ItemType Directory -Force -ErrorAction SilentlyContinue
-                                            if ($Path -like "*.ps1") {
-                                                $Output = & $Path 2>&1
-                                                $ExitCode = $LASTEXITCODE
-                                            } else {
-                                                $Process = Start-Process -FilePath $Path -NoNewWindow -PassThru -Wait -RedirectStandardOutput "C:\DesktopSupportTools\exe_output.txt" -RedirectStandardError "C:\DesktopSupportTools\exe_error.txt" -Verb RunAs -ErrorAction Stop
-                                                $Output = Get-Content "C:\DesktopSupportTools\exe_output.txt" -Raw -ErrorAction SilentlyContinue
-                                                $ErrorOutput = Get-Content "C:\DesktopSupportTools\exe_error.txt" -Raw -ErrorAction SilentlyContinue
-                                                $ExitCode = $Process.ExitCode
-                                                return @{ Success = ($ExitCode -eq 0); Output = ($Output, $ErrorOutput | Out-String); ExitCode = $ExitCode; ProcessId = $Process.Id }
-                                            }
-                                            return @{ Success = ($ExitCode -eq 0); Output = $Output; ExitCode = $ExitCode }
-                                        } catch {
-                                            return @{ Success = $false; Output = "Exception: ${_.Exception.Message}"; ExitCode = -1 }
-                                        }
-                                    } -ArgumentList $FilePath -ErrorAction Stop
-                                    if ($Result.Success) {
-                                        Write-Log -Message "File '$SelectedFile' executed successfully on $TargetIP. PID: $($Result.ProcessId). Output: $($Result.Output)"
-                                        [System.Windows.Forms.MessageBox]::Show("File '$SelectedFile' executed successfully. PID: $($Result.ProcessId). Output: $($Result.Output)", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-                                    } else {
-                                        Write-Log -Message "ERROR: File '$SelectedFile' failed with exit code $($Result.ExitCode). Output: $($Result.Output)"
-                                        [System.Windows.Forms.MessageBox]::Show("File '$SelectedFile' failed with exit code $($Result.ExitCode). Output: $($Result.Output)", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                                    }
-                                } catch {
-                                    Write-Log -Message "ERROR: Failed to run file '$SelectedFile' on $TargetIP. Error: ${_.Exception.Message}"
-                                    [System.Windows.Forms.MessageBox]::Show("Failed to run file. Error: ${_.Exception.Message}", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                                }
-                            } else {
-                                Write-Log -Message "No file selected or interactive session required but not present."
-                            }
-                        }
-                        ([System.Windows.Forms.DialogResult]::Ignore) {
-                            Write-Log -Message "User chose to run a PowerShell command."
-                            Run-PowerShellCommand -Session $Session
-                        }
-                        ([System.Windows.Forms.DialogResult]::Retry) {
-                            Write-Log -Message "User chose to delete a file."
-                            Delete-File -Session $Session
-                        }
-                        ([System.Windows.Forms.DialogResult]::No) {
-                            Write-Log -Message "User chose to check logged-in users."
-                            Check-LoggedInUser -TargetIP $TargetIP -Session $Session
-                        }
-                        ([System.Windows.Forms.DialogResult]::Cancel) {
-                            Write-Log -Message "User chose to exit the session."
-                            break
-                        }
-                        default {
-                            Write-Log "WARNING: Invalid or null DialogResult encountered, defaulting to Cancel."
-                            break
-                        }
-                    }
-                } while ($SessionAction -ne [System.Windows.Forms.DialogResult]::Cancel)
-                Write-Log -Message "Closing session to $TargetIP..."
-                try {
-                    Remove-PSSession -Session $Session -ErrorAction Stop
-                    Write-Log -Message "Session closed successfully."
-                } catch {
-                    Write-Log -Message "ERROR: Failed to close session. Error: ${_.Exception.Message}"
-                }
-                $Session = $null
-            }
-            ([System.Windows.Forms.DialogResult]::No) {
-                Write-Log -Message "User chose to exit. Terminating script."
-                exit 0
-            }
-            default {
-                Write-Log "WARNING: Invalid or null initial action result, defaulting to exit."
-                exit 0
-            }
+
+    # Load required .NET assemblies with error handling
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        Write-Log "Successfully loaded System.Windows.Forms and System.Drawing assemblies."
+    } catch {
+        Write-Log "ERROR: Failed to load required .NET assemblies. Error: ${_.Exception.Message}"
+        [System.Windows.Forms.MessageBox]::Show("Failed to load required .NET assemblies. Please ensure PowerShell environment supports GUI. Error: ${_.Exception.Message}", "Assembly Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        exit 1
+    }
+
+    try {
+        Set-ExecutionPolicyIfNeeded
+        Write-Log -Message "Script started. Log file: $LogFile"
+        Write-Log -Message "Checking for MIG or VPN connection..."
+        if (-not (Test-ConnectionStatus)) {
+            Write-Log -Message "ERROR: MIG or VPN connection is not active."
+            [System.Windows.Forms.MessageBox]::Show("MIG or VPN connection is not active. Please connect and try again.", "Connection Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            exit 1
         }
-        Write-Log -Message "Prompting user to start another action or session..."
-        $Continue = Prompt-ForAnotherSession
-        Write-Log "Continue result: $Continue"
-    } while ($Continue -eq [System.Windows.Forms.DialogResult]::Yes)
-    Write-Log -Message "Script execution completed."
-} catch {
-    Write-Log -Message "Critical error in main: ${_.Exception.Message}"
-    [System.Windows.Forms.MessageBox]::Show("Critical error: ${_.Exception.Message}", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    exit 1
+        Write-Log -Message "Connection is active."
+        do {
+            $InitialAction = Prompt-InitialAction
+            Write-Log "Initial action result: $InitialAction"
+            switch ($InitialAction) {
+                ([System.Windows.Forms.DialogResult]::Yes) {
+                    Write-Log -Message "User chose to start a new session."
+                    $TargetIP = Get-IPAddressFromDialog
+                    if (-not $TargetIP) {
+                        Write-Log -Message "No computer name or IP provided or dialog cancelled. Returning to main menu."
+                        continue
+                    }
+                    if (-not (Test-ValidIPAddress -IPAddress $TargetIP)) {
+                        Write-Log -Message "Input '$TargetIP' is not an IP address. Attempting to resolve..."
+                        Test-MIGConnection -MachineList $TargetIP -DomainSuffix $MIGDomain
+                        if ($Global:FinalArray -and $Global:FinalArray.Count -gt 0) {
+                            $TargetIP = $Global:FinalArray[0]
+                            Write-Log -Message "Resolved '$TargetIP' to $TargetIP."
+                        } else {
+                            Write-Log -Message "ERROR: Could not resolve '$TargetIP' to an IP address."
+                            [System.Windows.Forms.MessageBox]::Show("Could not resolve '$TargetIP' to an IP address.", "Resolution Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                            continue
+                        }
+                    }
+                    Write-Log -Message "Target computer name/IP: $TargetIP"
+                    $MaxPingRetries = 3
+                    $PingRetryCount = 0
+                    $PingSuccess = $false
+                    while (-not $PingSuccess -and $PingRetryCount -lt $MaxPingRetries) {
+                        Write-Log -Message "Testing connectivity to $TargetIP (Attempt $($PingRetryCount + 1)/$MaxPingRetries)..."
+                        if (Test-Connection -ComputerName $TargetIP -Count 1 -Quiet) {
+                            Write-Log -Message "Successfully pinged $TargetIP."
+                            $PingSuccess = $true
+                        } else {
+                            $PingRetryCount++
+                            Write-Log -Message "ERROR: Failed to reach $TargetIP (Attempt $PingRetryCount/$MaxPingRetries)."
+                            if ($PingRetryCount -lt $MaxPingRetries) {
+                                Write-Log -Message "Retrying in 5 seconds..."
+                                Start-Sleep -Seconds 5
+                            }
+                        }
+                    }
+                    if (-not $PingSuccess) {
+                        Write-Log -Message "ERROR: Cannot reach $TargetIP after $MaxPingRetries attempts."
+                        [System.Windows.Forms.MessageBox]::Show("Cannot reach $TargetIP after $MaxPingRetries attempts.", "Connection Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                        continue
+                    }
+                    Write-Log -Message "Checking TrustedHosts configuration..."
+                    $TrustedHosts = (Get-Item -Path WSMan:\localhost\Client\TrustedHosts).Value
+                    Write-Log -Message "Current TrustedHosts: $TrustedHosts"
+                    if ($TrustedHosts -notlike "*$TargetIP*") {
+                        try {
+                            Set-Item -Path WSMan:\localhost\Client\TrustedHosts -Value "" -Force -ErrorAction Stop
+                            Write-Log -Message "Cleared existing TrustedHosts."
+                            Set-Item -Path WSMan:\localhost\Client\TrustedHosts -Value $TargetIP -Force -ErrorAction Stop
+                            Write-Log -Message "Added $TargetIP to TrustedHosts."
+                        } catch {
+                            Write-Log -Message "ERROR: Failed to update TrustedHosts. Error: ${_.Exception.Message}"
+                            continue
+                        }
+                    }
+                    Write-Log -Message "Testing WinRM connectivity to $TargetIP on port 5985..."
+                    $NetTest = Test-NetConnection -ComputerName $TargetIP -Port 5985 -ErrorAction Stop
+                    Write-Log -Message "Network Test: TcpTestSucceeded = $($NetTest.TcpTestSucceeded)"
+                    if (-not $NetTest.TcpTestSucceeded) {
+                        Write-Log -Message "ERROR: Port 5985 is not accessible on $TargetIP. Check firewall or VPN settings."
+                        [System.Windows.Forms.MessageBox]::Show("Port 5985 is not accessible on $TargetIP. Check firewall or VPN settings.", "WinRM Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                        continue
+                    }
+                    Write-Log -Message "Establishing PowerShell session to $TargetIP..."
+                    $MaxRetries = 5
+                    $RetryCount = 0
+                    $Session = $null
+                    $SessionOption = New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 60000
+                    while (-not $Session -and $RetryCount -lt $MaxRetries) {
+                        try {
+                            $Session = New-PSSession -ComputerName $TargetIP -SessionOption $SessionOption -ErrorAction Stop
+                            Write-Log -Message "PowerShell session established successfully."
+                            $Status = Invoke-Command -Session $Session -ScriptBlock {
+                                $WinRM = Get-Service -Name WinRM | Select-Object -Property Status
+                                $UAC = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LocalAccountTokenFilterPolicy" -ErrorAction SilentlyContinue
+                                $UACStatus = if ($UAC -and $UAC.LocalAccountTokenFilterPolicy -eq 1) { "UAC allows remote admin access" } else { "UAC may block remote admin access" }
+                                return @{ WinRMStatus = $WinRM.Status; UACStatus = $UACStatus }
+                            }
+                            Write-Log -Message "WinRM Status: $($Status.WinRMStatus)"
+                            Write-Log -Message "UAC Status: $($Status.UACStatus)"
+                            break
+                        } catch {
+                            $RetryCount++
+                            Write-Log -Message "ERROR: Failed to establish session to $TargetIP (Attempt $RetryCount/$MaxRetries). Error: ${_.Exception.Message}"
+                            if ($_.Exception.Message -match "Access is denied") {
+                            } elseif ($_.Exception.Message -match "WinRM") {
+                                Write-Log -Message "WinRM error. Ensure WinRM is enabled on $TargetIP and port 5985 is open."
+                            }
+                            if ($RetryCount -lt $MaxRetries) {
+                                Write-Log -Message "Retrying in 10 seconds..."
+                                Start-Sleep -Seconds 10
+                            }
+                        }
+                    }
+                    if (-not $Session) {
+                        Write-Log -Message "ERROR: Failed to establish session after $MaxRetries attempts."
+                        [System.Windows.Forms.MessageBox]::Show("Failed to establish session after $MaxRetries attempts.", "Session Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                        continue
+                    }
+                    do {
+                        if (-not $Session -or $Session.State -ne 'Opened') {
+                            Write-Log -Message "ERROR: Session is null or not open. Attempting to reconnect to $TargetIP..."
+                            try {
+                                Remove-PSSession -Session $Session -ErrorAction SilentlyContinue
+                                $Session = New-PSSession -ComputerName $TargetIP -SessionOption $SessionOption -ErrorAction Stop
+                                Write-Log -Message "Reconnected session successfully."
+                            } catch {
+                                Write-Log -Message "ERROR: Failed to reconnect session to $TargetIP. Error: ${_.Exception.Message}"
+                                break
+                            }
+                        }
+                        $SessionAction = Prompt-SessionAction
+                        Write-Log "Session action result: $SessionAction"
+                        switch ($SessionAction) {
+                            ([System.Windows.Forms.DialogResult]::Yes) {
+                                Write-Log -Message "User chose to copy a file."
+                                $FilePath = Get-FilePath
+                                if ($FilePath) {
+                                    try {
+                                        Copy-Item -Path $FilePath -Destination "C:\DesktopSupportTools\" -ToSession $Session -ErrorAction Stop
+                                        Write-Log -Message "Successfully copied file '$($FilePath.Split('\')[-1])' to C:\DesktopSupportTools on $TargetIP."
+                                        [System.Windows.Forms.MessageBox]::Show("Successfully copied '$($FilePath.Split('\')[-1])' to C:\DesktopSupportTools.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                    } catch {
+                                        Write-Log -Message "ERROR: Failed to copy file to $TargetIP. Error: ${_.Exception.Message}"
+                                        [System.Windows.Forms.MessageBox]::Show("Failed to copy file. Error: ${_.Exception.Message}", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                                    }
+                                } else {
+                                    Write-Log -Message "No file selected for copying."
+                                }
+                            }
+                            ([System.Windows.Forms.DialogResult]::OK) {
+                                Write-Log -Message "User chose to run a file."
+                                $SelectedFile = Select-FileToRun -Session $Session
+                                if ($SelectedFile) {
+                                    try {
+                                        $FilePath = "C:\DesktopSupportTools\$SelectedFile"
+                                        Write-Log -Message "Running file '$SelectedFile' on $TargetIP..."
+                                        $Result = Invoke-Command -Session $Session -ScriptBlock {
+                                            param($Path)
+                                            try {
+                                                New-Item -Path "C:\DesktopSupportTools" -ItemType Directory -Force -ErrorAction SilentlyContinue
+                                                if ($Path -like "*.ps1") {
+                                                    $Output = & $Path 2>&1
+                                                    $ExitCode = $LASTEXITCODE
+                                                } else {
+                                                    $Process = Start-Process -FilePath $Path -NoNewWindow -PassThru -Wait -RedirectStandardOutput "C:\DesktopSupportTools\exe_output.txt" -RedirectStandardError "C:\DesktopSupportTools\exe_error.txt" -Verb RunAs -ErrorAction Stop
+                                                    $Output = Get-Content "C:\DesktopSupportTools\exe_output.txt" -Raw -ErrorAction SilentlyContinue
+                                                    $ErrorOutput = Get-Content "C:\DesktopSupportTools\exe_error.txt" -Raw -ErrorAction SilentlyContinue
+                                                    $ExitCode = $Process.ExitCode
+                                                    return @{ Success = ($ExitCode -eq 0); Output = ($Output, $ErrorOutput | Out-String); ExitCode = $ExitCode; ProcessId = $Process.Id }
+                                                }
+                                                return @{ Success = ($ExitCode -eq 0); Output = $Output; ExitCode = $ExitCode }
+                                            } catch {
+                                                return @{ Success = $false; Output = "Exception: ${_.Exception.Message}"; ExitCode = -1 }
+                                            }
+                                        } -ArgumentList $FilePath -ErrorAction Stop
+                                        if ($Result.Success) {
+                                            Write-Log -Message "File '$SelectedFile' executed successfully on $TargetIP. PID: $($Result.ProcessId). Output: $($Result.Output)"
+                                            [System.Windows.Forms.MessageBox]::Show("File '$SelectedFile' executed successfully. PID: $($Result.ProcessId). Output: $($Result.Output)", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                        } else {
+                                            Write-Log -Message "ERROR: File '$SelectedFile' failed with exit code $($Result.ExitCode). Output: $($Result.Output)"
+                                            [System.Windows.Forms.MessageBox]::Show("File '$SelectedFile' failed with exit code $($Result.ExitCode). Output: $($Result.Output)", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                                        }
+                                    } catch {
+                                        Write-Log -Message "ERROR: Failed to run file '$SelectedFile' on $TargetIP. Error: ${_.Exception.Message}"
+                                        [System.Windows.Forms.MessageBox]::Show("Failed to run file. Error: ${_.Exception.Message}", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                                    }
+                                } else {
+                                    Write-Log -Message "No file selected or interactive session required but not present."
+                                }
+                            }
+                            ([System.Windows.Forms.DialogResult]::Ignore) {
+                                Write-Log -Message "User chose to run a PowerShell command."
+                                Run-PowerShellCommand -Session $Session
+                            }
+                            ([System.Windows.Forms.DialogResult]::Retry) {
+                                Write-Log -Message "User chose to delete a file."
+                                Delete-File -Session $Session
+                            }
+                            ([System.Windows.Forms.DialogResult]::No) {
+                                Write-Log -Message "User chose to check logged-in users."
+                                Check-LoggedInUser -TargetIP $TargetIP -Session $Session
+                            }
+                            ([System.Windows.Forms.DialogResult]::Cancel) {
+                                Write-Log -Message "User chose to exit the session."
+                                break
+                            }
+                            default {
+                                Write-Log "WARNING: Invalid or null DialogResult encountered, defaulting to Cancel."
+                                break
+                            }
+                        }
+                    } while ($SessionAction -ne [System.Windows.Forms.DialogResult]::Cancel)
+                    Write-Log -Message "Closing session to $TargetIP..."
+                    try {
+                        Remove-PSSession -Session $Session -ErrorAction Stop
+                        Write-Log -Message "Session closed successfully."
+                    } catch {
+                        Write-Log -Message "ERROR: Failed to close session. Error: ${_.Exception.Message}"
+                    }
+                    $Session = $null
+                }
+                ([System.Windows.Forms.DialogResult]::No) {
+                    Write-Log -Message "User chose to exit. Terminating script."
+                    exit 0
+                }
+                default {
+                    Write-Log "WARNING: Invalid or null initial action result, defaulting to exit."
+                    exit 0
+                }
+            }
+            Write-Log -Message "Prompting user to start another action or session..."
+            $Continue = Prompt-ForAnotherSession
+            Write-Log "Continue result: $Continue"
+        } while ($Continue -eq [System.Windows.Forms.DialogResult]::Yes)
+        Write-Log -Message "Script execution completed."
+    } catch {
+        Write-Log -Message "Critical error in main: ${_.Exception.Message}"
+        [System.Windows.Forms.MessageBox]::Show("Critical error: ${_.Exception.Message}", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        exit 1
+    }
 }
+
+# Your script content here
+
+Read-Host -Prompt "Press Enter to exit" 
